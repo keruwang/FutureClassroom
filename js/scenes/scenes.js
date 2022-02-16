@@ -16,6 +16,7 @@ export default () => {
          { name: "DemoDots"      , path: "./demoDots.js"    },
          { name: "DemoBlobs"     , path: "./demoBlobs.js"   },
          { name: "DemoController", path: "./demoController.js"},
+         { name: "DemoInteract", path: "./demoInteract.js"},
       ]
    };
 }
