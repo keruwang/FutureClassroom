@@ -1,5 +1,6 @@
 "use strict";
 import { scenes } from "/js/handle_scenes.js";
+import * as cg from "./cg.js";
 
 import * as keyboardInput from "../../util/input_keyboard.js";
 
@@ -228,9 +229,19 @@ let M = new Matrix();
 //////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////// WEBGL SUPPORT ///////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////
+const TEXTURE_LOAD_STATE_UNFINISHED = 1;
+let textures = {};
 
-let textures = [];
-let isTexture = file => textures[file] && ! textures[file + '_error'];
+const DEFAULT_KEN_FONT = 'media/textures/kens-font.png';
+
+let isTexture = file => textures[file] && textures[file] != TEXTURE_LOAD_STATE_UNFINISHED && ! textures[file + '_error'];
+this.textureUnload = (file) => {
+   if (isTexture(file)) {
+      gl.deleteTexture(textures[file]);
+      delete textures[file];
+   }
+}
+
 
 this.addEventListenersToCanvas = function(canvas) {
    let r = canvas.getBoundingClientRect();
@@ -299,46 +310,85 @@ let drawMesh = (mesh, materialId, isTriangleMesh, textureSrc) => {
    setUniform('Matrix4fv', 'uPhong', false, [a[0],a[1],a[2],0, d[0],d[1],d[2],0, s[0],s[1],s[2],s[3], t[0],t[1],t[2],t[3]]);
 
    if (textureSrc) {
-      if (! textures[textureSrc]) {                  // LOAD THE TEXTURE IF IT HAS NOT BEEN LOADED.
+     // LOAD THE TEXTURE IF IT HAS NOT BEEN LOADED.
+     if (!textures.hasOwnProperty(textureSrc)) {
+       if (textureSrc == 'camera') {
+         // VIDEO TEXTURE FROM THE CAMERA CAN START IMMEDIATELY
+         textures[textureSrc] = gl.createTexture();
+         gl.bindTexture   (gl.TEXTURE_2D, textures[textureSrc]);
+         gl.texImage2D    (gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+         gl.texParameteri (gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+         gl.texParameteri (gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+       }
+       else {
+         // MARK AS LOADING IN-PROGRESS TO AVOID LOADING REPEATEDLY
+         textures[textureSrc] = TEXTURE_LOAD_STATE_UNFINISHED; 
          let image = new Image();
          image.onload = function(event) {
             try {
-               textures[this.textureSrc] = gl.createTexture();
-               gl.bindTexture   (gl.TEXTURE_2D, textures[this.textureSrc]);
-               gl.texImage2D    (gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this);
-               gl.texParameteri (gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-               gl.texParameteri (gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
-               gl.generateMipmap(gl.TEXTURE_2D);
-            } catch (e) { textures[textureSrc + '_error'] = true; }
+               if (textureSrc != DEFAULT_KEN_FONT) {
+                  textures[textureSrc] = gl.createTexture();
+                  gl.bindTexture   (gl.TEXTURE_2D, textures[textureSrc]);
+                  gl.texImage2D    (gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this);
+                  gl.texParameteri (gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                  gl.texParameteri (gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+                  gl.generateMipmap(gl.TEXTURE_2D);
+               } else {
+                  // FOR NOW, TEXTURE ATLASES SHOULD USE
+                  // NEAREST SAMPLING AND NO MIPMAPPING FOR SIMPLICITY
+                  // TO AVOID NEED FOR ADDITION OF PADDING OR CLAMPING IN THE FRAGMENT SHADER
+                  textures[textureSrc] = gl.createTexture();
+                  gl.bindTexture   (gl.TEXTURE_2D, textures[textureSrc]);
+                  gl.texImage2D    (gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this);
+                  gl.texParameteri (gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+                  gl.texParameteri (gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+               }
+            } catch (e) { 
+               textures[textureSrc + '_error'] = true; 
+               if (textures.hasOwnProperty(textureSrc)) {
+                  delete textures[textureSrc];
+               }
+            }
          }
-         image.textureSrc = textureSrc;
          image.src = textureSrc;
-      }
-      else {                                         // IF TEXTURE IS LOADED, TELL THE GPU ABOUT IT.
-         gl.activeTexture(gl.TEXTURE0);
-         gl.bindTexture(gl.TEXTURE_2D, textures[textureSrc]);
-      }
+       }
+     }
+     else if (textures[textureSrc] != TEXTURE_LOAD_STATE_UNFINISHED) { // IF TEXTURE IS LOADED, TELL THE GPU ABOUT IT.
+       gl.activeTexture(gl.TEXTURE0);
+       gl.bindTexture(gl.TEXTURE_2D, textures[textureSrc]);
+       // VIDEO TEXTURE FROM THE CAMERA NEEDS TO BE REFRESHED REPEATEDLY
+       if (textureSrc == 'camera')
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, window.video);
+     }
    }
+
+   // CANCEL DRAWING IF THE MESH DOES NOT EXIST
+   if (!mesh || mesh.length == 0) {
+      return;
+   }
+
    setUniform('1i', 'uSampler', 0);                            // SPECIFY TEXTURE INDEX.
    setUniform('1f', 'uTexture', isTexture(textureSrc)? 1 : 0); // ARE WE RENDERING A TEXTURE?
+   setUniform('1i', 'uVideo', textureSrc == 'camera'); // IS THIS A VIDEO TEXTURE FROM THE CAMERA?
+
    if (this.views.length == 1) {
       setUniform('Matrix4fv', 'uProj', false, this.views[0].projectionMatrix);
       setUniform('Matrix4fv', 'uView', false, this.views[0].viewMatrix);
-      if (mesh.length > 0) {
-         gl.bufferData(gl.ARRAY_BUFFER, mesh, gl.STATIC_DRAW);
-         if(mesh) gl.drawArrays(isTriangleMesh ? gl.TRIANGLES : gl.TRIANGLE_STRIP, 0, mesh.length / VERTEX_SIZE);
-      }
-    } else {
+      
+      gl.bufferData(gl.ARRAY_BUFFER, mesh, gl.STATIC_DRAW);
+      gl.drawArrays(isTriangleMesh ? gl.TRIANGLES : gl.TRIANGLE_STRIP, 0, mesh.length / VERTEX_SIZE);
+   } else {
+      const drawPrimitiveType = isTriangleMesh ? gl.TRIANGLES : gl.TRIANGLE_STRIP;
+      const vertexCount = mesh.length / VERTEX_SIZE;
       for (let i = 0; i < this.views.length; ++i) {
-        let view = this.views[i];
-        let vp = view.viewport;
-        gl.viewport(vp.x, vp.y, vp.width, vp.height);
-        setUniform('Matrix4fv', 'uProj', false, view.projectionMatrix);
-        setUniform('Matrix4fv', 'uView', false, view.viewMatrix);
-        if (mesh.length > 0) {
+         let view = this.views[i];
+         let vp = view.viewport;
+         gl.viewport(vp.x, vp.y, vp.width, vp.height);
+         setUniform('Matrix4fv', 'uProj', false, view.projectionMatrix);
+         setUniform('Matrix4fv', 'uView', false, view.viewMatrix);
+
          gl.bufferData(gl.ARRAY_BUFFER, mesh, gl.STATIC_DRAW);
-         if(mesh) gl.drawArrays(isTriangleMesh ? gl.TRIANGLES : gl.TRIANGLE_STRIP, 0, mesh.length / VERTEX_SIZE);
-      }
+         gl.drawArrays(drawPrimitiveType, 0, vertexCount);
       }
    }
 }
@@ -427,9 +477,31 @@ let glueMeshes = (a, b) => {
    return new Float32Array(c);
 }
 
+let createTextMesh = text => {
+   let italic = text.substring(0,3) == '<i>';
+   if (italic)
+      text = text.substring(3, text.length);
+   let dx = text.length / 2;
+   let uv = (i,du,dv) => {
+      let c = text.charCodeAt(i) - 32;
+      let col = c % 12;
+      let row = c / 12 >> 0;
+      let u = (col + du + italic*(dv/2-1/4)) / 12,
+          v = (row + dv) / 8;
+      return [u, v];
+   };
+   let V = [];
+   for (let i = 0 ; i < text.length ; i++)
+   for (let j = 0 ; j < 2 ; j++) {
+      V.push(vertexArray([dx-i-j, 1,0],[0,0,1],[1,0,0],uv(i,j,0)));
+      V.push(vertexArray([dx-i-j,-1,0],[0,0,1],[1,0,0],uv(i,j,1)));
+   }
+   return new Float32Array(V.flat());
+}
+
 let createSquareMesh = (i, z) => {
-   let vs = VERTEX_SIZE, j = z < 0 ? (i + 2) % 3 : (i + 1) % 3,
-                             k = z < 0 ? (i + 1) % 3 : (i + 2) % 3;
+   let j = z < 0 ? (i + 2) % 3 : (i + 1) % 3,
+       k = z < 0 ? (i + 1) % 3 : (i + 2) % 3;
 
    let A = []; A[i] = z; A[j] = -1; A[k] =  1;
    let B = []; B[i] = z; B[j] = -1; B[k] = -1;
@@ -1457,7 +1529,7 @@ let S = [], vm, vmi, computeQuadric, activeSet, implicitSurface,
       if (isModeler) {
          if (window.animate)
             window.animate();
-         model.render(vm);
+         root.render(vm);
          model.setControls();
       }
 
@@ -1504,10 +1576,10 @@ let S = [], vm, vmi, computeQuadric, activeSet, implicitSurface,
       let deltaTime = time - prevTime;
       fps = .1 * fps + .9 / deltaTime;
       prevTime = time;
-   
+
       setUniform('1f', 'uOpacity', 1);
       let r3 = Math.sqrt(1/3);
-      setUniform('3fv', 'uLDir', [r3,r3,-r3, -r3,-r3,r3]);              // SET GPU LIGHTS
+      setUniform('3fv', 'uLDir', [r3,r3,r3, -r3,-r3,-r3]);              // SET GPU LIGHTS
       setUniform('3fv', 'uLCol', [.6,.8,1, .4,.3,.2]);
 
       // HANDLE EXPERIMENTS
@@ -1722,16 +1794,16 @@ let S = [], vm, vmi, computeQuadric, activeSet, implicitSurface,
 
             // IF IN BLOBBY MODE, ADD TO ARRAY OF BLOBS
 
-            if (S[n].isBlobby)
-            implicitSurface.addBlob(
-               S[n].form,
-               S[n].rounded,
-               S[n].info,
-               S[n].M,
-               materialId,
-               S[n].blur,
-               S[n].isBlobby ? S[n].sign : 0,
-               n==mn);
+            if (S[n].isBlobby && S[n].form != 'label')
+               implicitSurface.addBlob(
+                  S[n].form,
+                  S[n].rounded,
+                  S[n].info,
+                  S[n].M,
+                  materialId,
+                  S[n].blur,
+                  S[n].isBlobby ? S[n].sign : 0,
+                  n==mn);
 
             // IF NOT IN BLOBBY MODE, DRAW THE SHAPE
 
@@ -1746,9 +1818,14 @@ let S = [], vm, vmi, computeQuadric, activeSet, implicitSurface,
                if (S[n].info) {
                   name += ',' + S[n].info;
                   if (! formMesh[name])
-                     formMesh[name] = createMesh(64, 32, uvToForm, { form   : S[n].form,
-                                                                     rounded: S[n].rounded,
-                                                                     info   : S[n].info });
+		     formMesh[name] =
+		        S[n].form == 'label' ? createTextMesh(S[n].info)
+			                     : createMesh(64, 32, uvToForm,
+					       {
+					         form   : S[n].form,
+                                                 rounded: S[n].rounded,
+                                                 info   : S[n].info
+					       });
                }
                draw(formMesh[name], materialId, null, null, null, S[n].texture);
                M.restore();
@@ -1867,7 +1944,8 @@ let S = [], vm, vmi, computeQuadric, activeSet, implicitSurface,
       rotatey = rotateModel(rotatey, rotateyState, matrix_rotateY);
       modelMatrix = matrix_multiply(matrix_translate([0,1.5,0]), modelMatrix);
 
-      vm  = matrix_multiply(viewMatrix, modelMatrix);
+      //vm  = matrix_multiply(viewMatrix, modelMatrix);
+      vm  = viewMatrix;
       vmi = matrix_inverse(vm);
    }
 
@@ -2901,7 +2979,6 @@ function Node(_form) {
       this._color    = [1,1,1];
       this._info     = '';
       this._melt     = false;
-      this._parent   = null;
       this._texture  = '';
       this._precision = 1;
       m.identity();
@@ -2913,10 +2990,7 @@ function Node(_form) {
       return this;
    }
 
-   this.setMatrix = mat => {
-      m.setValue(mat);
-   }
-
+   this._parent = null;
    this.clear();
 
    this.child = i => this._children[i];
@@ -2956,6 +3030,7 @@ function Node(_form) {
     this._children.splice(i, 1);
       return this;
    }
+   this.nChildren = ()      => { return this._children.length;      }
    this.animate   = func    => { this._animate = func; return this; }
    this.identity  = ()      => { m.identity();         return this; }
    this.aimX      = vec     => { m.aimX(vec);          return this; }
@@ -2975,13 +3050,32 @@ function Node(_form) {
                                               Array.isArray(r) ? r : [r,g,b]; return this; }
    this.blur      = value   => { this._blur = value;   return this; }
    this.info      = value   => { if (this.prop('_blend') && this._info != value) activeSet(true);
-                                this._info = value;   return this; }
+                                this._info = value;    return this; }
+   this.getInfo   = ()      => { return this._info; }
    this.texture   = src     => { this._texture = src;  return this; }
    this.bevel     = tf      => { this._bevel = tf === undefined ? true : tf; return this; }
    this.blend     = tf      => { if (this._blend != tf) activeSet(true);
                                 this._blend = tf === undefined ? false : tf; return this; }
    this.melt      = tf      => { this._melt  = tf === undefined ? true : tf; return this; }
    this.precision = value   => { this._precision = value; return this; }
+   this.getGlobalMatrix = () => {
+      let M = this.getMatrix();
+      for (let node = this._parent ; node ; node = node._parent)
+         M = cg.mMultiply(node.getMatrix(), M);
+      return M;
+   }
+
+   this.setUniform = (type, name, a, b, c, d, e, f) => {
+      let clay = this._clay;
+      if (clay) {
+	 let gl = clay.gl;
+         let program = clay.clayPgm.program.program;
+         let loc = gl.getUniformLocation(program, name);
+         (gl['uniform' + type])(loc, a, b, c, d, e, f);
+      }
+   }
+
+   this.viewMatrix = n => cg.mInverse(views[n ? 1 : 0]._viewMatrix);
 
    window.controlAction = ch => {
       if (model._controlActions[ch])
@@ -3012,7 +3106,11 @@ function Node(_form) {
          }
          previousTime = this.time;
       }
+
       rm = matrix_multiply(pm, m.getValue());
+      if (this == model)
+         rm = matrix_multiply(rm, modelMatrix);
+
       if (form == 'root')
          S = [];
       else if (form) {
@@ -3026,7 +3124,8 @@ function Node(_form) {
             rounded: this.prop('_bevel'),
             sign: 1,
             symmetry: 0,
-            texture: this.prop('_texture'),
+            texture: form == 'label' ? DEFAULT_KEN_FONT
+	                             : this.prop('_texture'),
             form: form,
             M: matrix_multiply(vmi, rm)
          };
@@ -3040,8 +3139,12 @@ function Node(_form) {
 
 // EXPOSE A ROOT NODE FOR EXTERNAL MODELING.
 
-   let model = new Node('root');
-   this.model = model;
+   let root = new Node('root');
+   this.widgets = root.add();
+   this.model = root.add();
+   let model = this.model;
+   model._clay = this;
    let startTime = Date.now() / 1000;
 }
+
 

@@ -27,7 +27,7 @@ import { Clay } from "./render/core/clay.js";
 
 window.wsport = 8447;
 window.vr = false;
-window.interactMode = 1;
+window.interactMode = 0;
 window.model = 0;
 
 // If requested, use the polyfill to provide support for mobile devices
@@ -158,6 +158,7 @@ function onRequestSession() {
     return navigator.xr
         .requestSession("immersive-vr", {
             requiredFeatures: ["local-floor"],
+            optionalFeatures: ["hand-tracking"],
         })
         .then((session) => {
             xrButton.setSession(session);
