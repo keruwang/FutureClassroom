@@ -235,14 +235,25 @@ float noise(vec3 point) {
                + specular.rgb * pow(max(0., R.z), specular.w)
        );
     }
-    vec4 texture = texture(uSampler, vUV);
-    color *= mix(vec3(1.), texture.rgb, texture.a * uTexture);
-
-    if (uVideo > 0)
-       color = texture.rgb * texture.rgb;
-
     float opacity = uOpacity;
-    if (uProcedure > 0) {
+
+    if (uVideo == 0) {
+       vec4 texture = texture(uSampler, vUV);
+       color *= mix(vec3(1.), texture.rgb, texture.a * uTexture);
+    }
+
+    // IF VIDEO TEXTURE, REVERSE CAMERA IMAGE AND IMPLEMENT GREENSCREEN.
+
+    if (uVideo == 1) {
+       vec4 texture = texture(uSampler, vUV);
+       color = texture.rgb;
+       if (color.g > .2 && color.r < .2)
+          opacity *= min(1., 1. - 8.*(1.5*color.g - (color.r + color.b)));
+       color.g = mix(min(color.g, color.r), color.g, 2. * color.g - 1.);
+       color = color * color;
+    }
+
+    if (uProcedure == 1) {
        opacity = sign(noise(2. * vAPos + vec3(uTime,uTime,uTime)));
     }
 
@@ -1064,8 +1075,8 @@ export class Renderer {
     // gl.clearDepth(-1);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    //gl.enable(gl.CULL_FACE);
-    // gl.cullFace(gl.FRONT);
+    gl.enable(gl.CULL_FACE);
+    //gl.cullFace(gl.FRONT);
 
     let bpe = Float32Array.BYTES_PER_ELEMENT;
     let aPos = gl.getAttribLocation(pgm.program, "aPos");

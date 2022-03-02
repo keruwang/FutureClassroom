@@ -55,7 +55,7 @@ export const init = async model => {
          }
       } else {
       cube.identity().move(0,1.6,0);
-      catched =  -1;
+      catched =  0;
          for(let i = 0; i < 2; i ++) {
             if(fingerX[i] != null) {
                spheres[i].identity().move(fingerX[i], fingerY[i], 0).scale(0.01);
@@ -65,10 +65,12 @@ export const init = async model => {
                let x1 = mat[12];
                let y1 = mat[13];
                let dist = Math.sqrt(Math.pow(x0 - x1, 2), Math.pow(y0 - y1, 2));
-               if(dist < 0.1) {
-                  catched = i;
+               if(dist < 0.05) {
+                  catched += (i + 1);
+                  // if(catched == 3) {
                   mat[12] = x0;
                   mat[13] = y0;
+                  // }
                } 
             } else {
                spheres[i].scale(0);
@@ -78,14 +80,17 @@ export const init = async model => {
          
       cube.scale(.7,.5,.01);
       switch(catched) {
-         case -1:
+         case 0:
             obj.color(1,1,1);
             break;
-         case 0:
+         case 1:
             obj.color(1,0,0);
             break;
-         case 1:
+         case 2:
             obj.color(1,0.8,0.2);
+            break;
+         case 3:
+            obj.color(1,0.4,0.1);
             break;
       }
          
