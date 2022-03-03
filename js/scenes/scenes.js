@@ -21,6 +21,7 @@ export default () => {
          { name: "DemoLabel"  , path: "./demoLabel.js"   },
          { name: "DemoGLTF"   , path: "./demoGLTF.js"    },
          { name: "DemoInteract"   , path: "./demoInteract.js"    },
+         { name: "DemoDesktopHand"   , path: "./demoDesktopHand.js"    },
       ]
    };
 }
